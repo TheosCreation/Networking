@@ -31,20 +31,55 @@ bool InitWSA() {
     return true;
 }
 
-void ReceiveMessages(SOCKET clientSock) {
-    char buffer[256];
-    while (true) {
-        int rcv = recv(clientSock, buffer, sizeof(buffer), 0);
-        if (rcv == SOCKET_ERROR) {
-            printf("Error in recv(). Error code: %d\n", WSAGetLastError());
-            continue;
+std::string GetNameBySocket(SOCKET clientSock) {
+    for (size_t i = 0; i < clients.size(); ++i) {
+        if (clients[i] == clientSock) {
+            return clientNames[i];
         }
-        if (rcv == 0) {
-            printf("Server disconnected.\n");
+    }
+    return "Unknown";
+}
+
+void RemoveClient(SOCKET clientSock) {
+    for (size_t i = 0; i < clients.size(); ++i) {
+        if (clients[i] == clientSock) {
+            closesocket(clientSock);
+            printf("[%s] disconnected.\n", clientNames[i].c_str());
+            clientNames.erase(clientNames.begin() + i);
+            clients.erase(clients.begin() + i);
             break;
         }
-        buffer[rcv] = '\0';
-        printf("%s\n", buffer);
+    }
+}
+
+void BroadcastMessage(SOCKET senderSock, const char* buffer, int bytesReceived) {
+    std::string senderName = GetNameBySocket(senderSock);
+    std::string message = "[" + senderName + "]: " + std::string(buffer, bytesReceived);
+
+    for (size_t i = 0; i < clients.size(); ++i) {
+        // Skip sending the message back to the sender
+        if (clients[i] == senderSock) {
+            continue;
+        }
+
+        // Send the formatted message to each connected client
+        send(clients[i], message.c_str(), message.length(), 0);
+    }
+}
+
+void ReceiveMessages(SOCKET clientSock) {
+    char buffer[4096];
+    while (true) {
+        ZeroMemory(buffer, sizeof(buffer));
+        int bytesReceived = recv(clientSock, buffer, sizeof(buffer), 0);
+        if (bytesReceived <= 0) {
+            printf("[%s] disconnected.\n", GetNameBySocket(clientSock).c_str());
+            RemoveClient(clientSock);
+            break;
+        }
+        printf("[%s]: %s\n", GetNameBySocket(clientSock).c_str(), buffer);
+        // Broadcast the message to all other clients
+        BroadcastMessage(clientSock, buffer, bytesReceived);
     }
 }
 
@@ -74,19 +109,20 @@ void Client() {
 
     char name[256];
     printf("Enter your name: ");
-    gets_s(name);
+    fgets(name, sizeof(name), stdin);
+    name[strcspn(name, "\n")] = '\0'; // Remove newline character
     send(clientSock, name, strlen(name), 0);
 
-    std::thread recvThread(ReceiveMessages, clientSock);
-    recvThread.detach(); // Detach the thread to run independently
-
+    std::string clientName = "[" + std::string(name) + "]: ";
     char message[256];
     while (true) {
         printf("Enter message: ");
-        gets_s(message);
+        fgets(message, sizeof(message), stdin);
+        message[strcspn(message, "\n")] = '\0'; // Remove newline character
         if (strcmp(message, "exit") == 0)
             break;
-        send(clientSock, message, strlen(message), 0);
+        std::string fullMessage = clientName + message;
+        send(clientSock, fullMessage.c_str(), fullMessage.length(), 0);
     }
 
     closesocket(clientSock);
@@ -94,32 +130,17 @@ void Client() {
 
 void ClientHandler(SOCKET clientSock) {
     char clientName[256];
-    recv(clientSock, clientName, sizeof(clientName), 0);
+    int bytesReceived = recv(clientSock, clientName, sizeof(clientName) - 1, 0);
+    if (bytesReceived <= 0) {
+        closesocket(clientSock);
+        return;
+    }
+    clientName[bytesReceived] = '\0'; // Add null terminator to properly terminate the string
     std::string name(clientName);
     clientNames.push_back(name);
-
-    char buffer[256];
-    while (true) {
-        int rcv = recv(clientSock, buffer, sizeof(buffer), 0);
-        if (rcv == SOCKET_ERROR) {
-            printf("Error in recv(). Error code: %d\n", WSAGetLastError());
-            continue;
-        }
-        if (rcv == 0) {
-            printf("Client disconnected.\n");
-            break;
-        }
-        buffer[rcv] = '\0';
-        printf("[%s]: %s\n", clientName, buffer);
-        // Send the message to all clients
-        for (size_t i = 0; i < clients.size(); ++i) {
-            if (clients[i] != clientSock) {
-                send(clients[i], buffer, strlen(buffer), 0);
-            }
-        }
-    }
-
-    closesocket(clientSock);
+    clients.push_back(clientSock);
+    printf("[%s] connected.\n", name.c_str());
+    ReceiveMessages(clientSock);
 }
 
 void Server() {
@@ -163,7 +184,6 @@ void Server() {
             WSACleanup();
             return;
         }
-        clients.push_back(clientSock);
         std::thread clientThread(ClientHandler, clientSock);
         clientThread.detach(); // Detach the thread to run independently
     }
@@ -185,6 +205,7 @@ int main() {
         Server();
     }
     else if (choice == 'c') {
+        getchar(); // Clear the newline character left in the input buffer
         Client();
     }
     else {
