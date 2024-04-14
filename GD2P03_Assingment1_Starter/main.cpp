@@ -12,6 +12,7 @@
 std::vector<SOCKET> clients;
 std::vector<std::string> clientNames;
 sf::Text serverText;
+sf::Text clientText;
 
 bool InitWSA() {
     WORD wVersionRequested;
@@ -66,67 +67,10 @@ void BroadcastMessage(SOCKET senderSock, const char* buffer, int bytesReceived) 
 
         // Send the formatted message to each connected client
         send(clients[i], message.c_str(), message.length(), 0);
+
+        // Also, send the client text to each connected client
+        send(clients[i], clientText.getString().toAnsiString().c_str(), clientText.getString().getSize(), 0);
     }
-}
-
-void ReceiveMessages(SOCKET clientSock) {
-    char buffer[4096];
-    while (true) {
-        ZeroMemory(buffer, sizeof(buffer));
-        int bytesReceived = recv(clientSock, buffer, sizeof(buffer), 0);
-        if (bytesReceived <= 0) {
-            RemoveClient(clientSock);
-            break;
-        }
-
-        serverText.setString("[" + GetNameBySocket(clientSock) + "]: " + buffer + "\n" + serverText.getString());
-        // Broadcast the message to all other clients
-        BroadcastMessage(clientSock, buffer, bytesReceived);
-    }
-}
-
-void Client() {
-    SOCKET clientSock;
-
-    clientSock = socket(AF_INET, SOCK_STREAM, 0);
-    if (clientSock == INVALID_SOCKET) {
-        printf("Error in socket(), Error code %d\n", WSAGetLastError());
-        return;
-    }
-
-    sockaddr_in recvAddr;
-    recvAddr.sin_family = AF_INET;
-    recvAddr.sin_port = htons(15366); // Change to server port
-    InetPton(AF_INET, L"127.0.0.1", &recvAddr.sin_addr.S_un.S_addr);
-
-    int status = connect(clientSock, (sockaddr*)&recvAddr, sizeof(recvAddr));
-    if (status == SOCKET_ERROR) {
-        printf("Error in connect(), Error code %d\n", WSAGetLastError());
-        closesocket(clientSock);
-        return;
-    }
-
-    // Connected to server
-    printf("Connected to server.\n");
-
-    char name[256];
-    printf("Enter your name: ");
-    fgets(name, sizeof(name), stdin);
-    name[strcspn(name, "\n")] = '\0'; // Remove newline character
-    send(clientSock, name, strlen(name), 0);
-
-    std::string clientName = "[" + std::string(name) + "]: ";
-    char message[256];
-    while (true) {
-        printf("Enter message: ");
-        fgets(message, sizeof(message), stdin);
-        message[strcspn(message, "\n")] = '\0'; // Remove newline character
-        if (strcmp(message, "exit") == 0)
-            break;
-        send(clientSock, message, 256, 0);
-    }
-
-    closesocket(clientSock);
 }
 
 void ClientHandler(SOCKET clientSock) {
@@ -143,7 +87,18 @@ void ClientHandler(SOCKET clientSock) {
 
     serverText.setString("[" + name + "] connected.\n" + serverText.getString());
 
-    ReceiveMessages(clientSock);
+    while (true) {
+        char buffer[4096];
+        ZeroMemory(buffer, sizeof(buffer));
+        int bytesReceived = recv(clientSock, buffer, sizeof(buffer), 0);
+        if (bytesReceived <= 0) {
+            RemoveClient(clientSock);
+            break;
+        }
+
+        std::string message = "[" + GetNameBySocket(clientSock) + "]: " + std::string(buffer, bytesReceived);
+        serverText.setString(message + "\n" + serverText.getString());
+    }
 }
 
 void Server() {
@@ -205,20 +160,15 @@ int main() {
         return 1;
     }
 
-    serverText.setCharacterSize(16);
-    serverText.setFont(font);
-    serverText.setFillColor(sf::Color::White);
-    serverText.setPosition(10, 10);
-
-    sf::Text clientText("", font, 16);
-    clientText.setFillColor(sf::Color::White);
-    clientText.setPosition(10, 10);
-
     char choice;
     printf("Enter 's' for server or 'c' for client: ");
     std::cin >> choice;
 
     if (choice == 's') {
+        serverText.setCharacterSize(16);
+        serverText.setFont(font);
+        serverText.setFillColor(sf::Color::White);
+        serverText.setPosition(10, 10);
 
         sf::RenderWindow serverWindow(sf::VideoMode(800, 600), "Server Chat");
 
@@ -240,24 +190,81 @@ int main() {
         serverThread.join();
     }
     else if (choice == 'c') {
-        // Launch client window
-        //sf::RenderWindow clientWindow(sf::VideoMode(800, 600), "Client Chat");
+        SOCKET clientSock;
 
-        getchar(); // Clear the newline character left in the input buffer
-        Client();
-        //while (clientWindow.isOpen()) {
-        //    sf::Event event;
-        //    while (clientWindow.pollEvent(event)) {
-        //        if (event.type == sf::Event::Closed) {
-        //            clientWindow.close();
-        //        }
-        //    }
-        //    clientWindow.clear();
-        //
-        //    clientWindow.draw(clientText);
-        //
-        //    clientWindow.display();
-        //}
+        clientSock = socket(AF_INET, SOCK_STREAM, 0);
+        if (clientSock == INVALID_SOCKET) {
+            printf("Error in socket(), Error code %d\n", WSAGetLastError());
+            return -1;
+        }
+
+        sockaddr_in recvAddr;
+        recvAddr.sin_family = AF_INET;
+        recvAddr.sin_port = htons(15366); // Change to server port
+        InetPton(AF_INET, L"127.0.0.1", &recvAddr.sin_addr.S_un.S_addr);
+
+        int status = connect(clientSock, (sockaddr*)&recvAddr, sizeof(recvAddr));
+        if (status == SOCKET_ERROR) {
+            printf("Error in connect(), Error code %d\n", WSAGetLastError());
+            closesocket(clientSock);
+            return -1;
+        }
+
+        clientText.setCharacterSize(16);
+        clientText.setFont(font);
+        clientText.setFillColor(sf::Color::White);
+        clientText.setPosition(10, 30);
+        // Launch client window
+        sf::RenderWindow clientWindow(sf::VideoMode(800, 600), "Client Chat");
+
+        // Text input field
+        sf::Text inputText("", font, 16);
+        inputText.setFillColor(sf::Color::White);
+        inputText.setPosition(10, 550);
+        std::string inputBuffer;
+
+        while (clientWindow.isOpen()) {
+            sf::Event event;
+            while (clientWindow.pollEvent(event)) {
+                if (event.type == sf::Event::Closed) {
+                    clientWindow.close();
+                }
+                // Handle text input
+                if (event.type == sf::Event::TextEntered) {
+                    if (event.text.unicode == '\b') { // Backspace
+                        if (!inputBuffer.empty()) {
+                            inputBuffer.pop_back();
+                            inputText.setString(inputBuffer);
+                        }
+                    }
+                    else if (event.text.unicode < 128) { // Printable characters
+                        inputBuffer += static_cast<char>(event.text.unicode);
+                        inputText.setString(inputBuffer);
+                    }
+                }
+                // Handle Enter key press
+                if (event.type == sf::Event::KeyPressed) {
+                    if (event.key.code == sf::Keyboard::Enter) {
+                        // Send message to server
+                        if (!inputBuffer.empty()) {
+                            // Send the message to the server
+                            send(clientSock, inputBuffer.c_str(), inputBuffer.length(), 0);
+                            // Clear the input buffer and text field
+                            inputBuffer.clear();
+                            inputText.setString("");
+                        }
+                    }
+                }
+            }
+            clientWindow.clear();
+        
+            // Draw text input field
+            clientWindow.draw(inputText);
+
+            clientWindow.draw(clientText);
+        
+            clientWindow.display();
+        }
     }
     else {
         printf("Invalid choice.\n");
