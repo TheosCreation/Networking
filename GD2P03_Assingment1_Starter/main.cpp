@@ -1,8 +1,10 @@
 #include <iostream>
 #include <stdio.h>
 #include <string>
+#include <sstream>
 #include <vector>
 #include <thread>
+#include <algorithm>s
 #include <SFML/Graphics.hpp>
 
 #include <winsock2.h>
@@ -13,6 +15,7 @@ std::vector<SOCKET> clients;
 std::vector<std::string> clientNames;
 sf::Text serverText;
 sf::Text clientText;
+bool running = true;
 
 bool InitWSA() {
     WORD wVersionRequested;
@@ -55,21 +58,57 @@ void RemoveClient(SOCKET clientSock) {
     }
 }
 
-void BroadcastMessage(SOCKET senderSock, const char* buffer, int bytesReceived) {
-    std::string senderName = GetNameBySocket(senderSock);
-    std::string message = "[" + senderName + "]: " + std::string(buffer, bytesReceived);
-
+void BroadcastMessage(const std::string& message) {
     for (size_t i = 0; i < clients.size(); ++i) {
-        // Skip sending the message back to the sender
-        if (clients[i] == senderSock) {
-            continue;
+        send(clients[i], message.c_str(), message.length(), 0);
+    }
+}
+
+std::string BuildChatHistory() {
+    std::string history;
+    sf::String serverTextString = serverText.getString();
+    size_t startPos = 0;
+    size_t endPos = serverTextString.find('\n');
+
+    while (endPos != sf::String::InvalidPos) {
+        std::string line = serverTextString.substring(startPos, endPos - startPos);
+
+        // Check if the line contains client connection or disconnection messages
+        if (line.empty() || line.find("[") != std::string::npos) {
+            startPos = endPos + 1; // Move to the next line
+            endPos = serverTextString.find('\n', startPos);
+            continue; // Skip these lines
         }
 
-        // Send the formatted message to each connected client
-        send(clients[i], message.c_str(), message.length(), 0);
+        // Append the line to the chat history if it's not empty
+        if (!line.empty()) {
+            history += line + '\n';
+        }
 
-        // Also, send the client text to each connected client
-        send(clients[i], clientText.getString().toAnsiString().c_str(), clientText.getString().getSize(), 0);
+        startPos = endPos + 1; // Move to the next line
+        endPos = serverTextString.find('\n', startPos);
+    }
+
+    return history;
+}
+
+void ReceiveMessages(SOCKET clientSock) {
+    char buffer[4096];
+    while (true) {
+        int bytesReceived = recv(clientSock, buffer, sizeof(buffer) - 1, 0); // Reduce buffer size by 1 to leave space for the null terminator
+        if (bytesReceived > 0) {
+            buffer[bytesReceived] = '\0'; // Add null terminator to properly terminate the string
+            std::string message(buffer);
+            clientText.setString(clientText.getString() + message + "\n");
+        }
+        else if (bytesReceived == 0) {
+            printf("Disconnected from server.\n");
+            break;
+        }
+        else {
+            printf("Error in recv(). Error code: %d\n", WSAGetLastError());
+            break;
+        }
     }
 }
 
@@ -85,6 +124,15 @@ void ClientHandler(SOCKET clientSock) {
     clientNames.push_back(name);
     clients.push_back(clientSock);
 
+    // Send the welcome message to the client
+    std::string welcomeMessage = "Welcome, " + name + "!\n";
+    send(clientSock, welcomeMessage.c_str(), welcomeMessage.length(), 0);
+
+    // Send the entire chat history to the client
+    std::string history = serverText.getString();
+    // Send the current chunk
+    send(clientSock, history.c_str(), history.length(), 0);
+
     serverText.setString("[" + name + "] connected.\n" + serverText.getString());
 
     while (true) {
@@ -98,6 +146,8 @@ void ClientHandler(SOCKET clientSock) {
 
         std::string message = "[" + GetNameBySocket(clientSock) + "]: " + std::string(buffer, bytesReceived);
         serverText.setString(message + "\n" + serverText.getString());
+
+        BroadcastMessage(message);
     }
 }
 
@@ -163,7 +213,8 @@ int main() {
     char choice;
     printf("Enter 's' for server or 'c' for client: ");
     std::cin >> choice;
-
+    
+    // we can split this program into two exe one for server and one for client
     if (choice == 's') {
         serverText.setCharacterSize(16);
         serverText.setFont(font);
@@ -209,6 +260,7 @@ int main() {
             closesocket(clientSock);
             return -1;
         }
+        std::thread receiveThread(ReceiveMessages, clientSock);
 
         clientText.setCharacterSize(16);
         clientText.setFont(font);
@@ -265,6 +317,10 @@ int main() {
         
             clientWindow.display();
         }
+
+
+        closesocket(clientSock);
+        receiveThread.join();
     }
     else {
         printf("Invalid choice.\n");
