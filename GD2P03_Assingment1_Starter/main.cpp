@@ -11,11 +11,20 @@
 #include <WS2tcpip.h>
 #pragma comment(lib, "Ws2_32.lib")
 
+//general
+bool running = true;
+const size_t MAX_LINES = 20;
+const size_t MAX_WIDTH = 20;
+
+//client
+sf::Text clientText;
+std::vector<std::string> messagesOnClient;
+
+//server
 std::vector<SOCKET> clients;
 std::vector<std::string> clientNames;
 sf::Text serverText;
-sf::Text clientText;
-bool running = true;
+std::vector<std::string> messagesOnServer;
 
 bool InitWSA() {
     WORD wVersionRequested;
@@ -46,50 +55,100 @@ std::string GetNameBySocket(SOCKET clientSock) {
     return "Unknown";
 }
 
+void WrapText(sf::Text& text, float maxWidth) {
+    sf::String wrappedText;
+    sf::String currentLine;
+    sf::String word;
+    for (const auto& character : text.getString()) {
+        if (character == ' ' || character == '\n') {
+            if (text.getFont()->getGlyph(word[0], text.getCharacterSize(), false).advance * word.getSize() + text.getFont()->getGlyph(currentLine[0], text.getCharacterSize(), false).advance * currentLine.getSize() > maxWidth) {
+                wrappedText += currentLine + '\n';
+                currentLine = word + ' ';
+            }
+            else {
+                currentLine += word + ' ';
+            }
+            word.clear();
+            if (character == '\n') {
+                wrappedText += currentLine + '\n';
+                currentLine.clear();
+            }
+        }
+        else {
+            word += character;
+        }
+    }
+    if (!currentLine.isEmpty()) {
+        wrappedText += currentLine;
+    }
+    text.setString(wrappedText);
+}
+
+void UpdateClientText() {
+    sf::String updatedText;
+    for (const auto& msg : messagesOnClient) {
+        updatedText += msg + "\n";
+    }
+    clientText.setString(updatedText);
+
+    // Wrap text
+    WrapText(clientText, MAX_WIDTH);
+
+    // If the number of lines is larger than max lines, trim the first line
+    size_t lineCount = std::count(clientText.getString().begin(), clientText.getString().end(), '\n');
+    while (lineCount > MAX_LINES) {
+        size_t newlinePos = clientText.getString().find('\n');
+        if (newlinePos != sf::String::InvalidPos) {
+            clientText.setString(clientText.getString().substring(newlinePos + 1));
+            lineCount--;
+        }
+        else {
+            break; // Should not occur, but safety check
+        }
+    }
+}
+
+void UpdateServerText() {
+    sf::String updatedText;
+    for (const auto& msg : messagesOnServer) {
+        updatedText += msg + "\n";
+    }
+    serverText.setString(updatedText);
+
+    // Wrap text
+    WrapText(serverText, MAX_WIDTH);
+
+    // If the number of lines is larger than max lines, trim the first line
+    size_t lineCount = std::count(serverText.getString().begin(), serverText.getString().end(), '\n');
+    while (lineCount > MAX_LINES) {
+        size_t newlinePos = serverText.getString().find('\n');
+        if (newlinePos != sf::String::InvalidPos) {
+            serverText.setString(serverText.getString().substring(newlinePos + 1));
+            lineCount--;
+        }
+        else {
+            break; // Should not occur, but safety check
+        }
+    }
+}
+
 void RemoveClient(SOCKET clientSock) {
     for (size_t i = 0; i < clients.size(); ++i) {
         if (clients[i] == clientSock) {
             closesocket(clientSock);
-            serverText.setString("[" + GetNameBySocket(clientSock) + "] disconnected.\n" + serverText.getString());
+            messagesOnServer.push_back("[" + GetNameBySocket(clientSock) + "] disconnected.");
             clientNames.erase(clientNames.begin() + i);
             clients.erase(clients.begin() + i);
             break;
         }
     }
+    UpdateServerText();
 }
 
 void BroadcastMessage(const std::string& message) {
     for (size_t i = 0; i < clients.size(); ++i) {
         send(clients[i], message.c_str(), message.length(), 0);
     }
-}
-
-std::string BuildChatHistory() {
-    std::string history;
-    sf::String serverTextString = serverText.getString();
-    size_t startPos = 0;
-    size_t endPos = serverTextString.find('\n');
-
-    while (endPos != sf::String::InvalidPos) {
-        std::string line = serverTextString.substring(startPos, endPos - startPos);
-
-        // Check if the line contains client connection or disconnection messages
-        if (line.empty() || line.find("[") != std::string::npos) {
-            startPos = endPos + 1; // Move to the next line
-            endPos = serverTextString.find('\n', startPos);
-            continue; // Skip these lines
-        }
-
-        // Append the line to the chat history if it's not empty
-        if (!line.empty()) {
-            history += line + '\n';
-        }
-
-        startPos = endPos + 1; // Move to the next line
-        endPos = serverTextString.find('\n', startPos);
-    }
-
-    return history;
 }
 
 void ReceiveMessages(SOCKET clientSock) {
@@ -99,7 +158,8 @@ void ReceiveMessages(SOCKET clientSock) {
         if (bytesReceived > 0) {
             buffer[bytesReceived] = '\0'; // Add null terminator to properly terminate the string
             std::string message(buffer);
-            clientText.setString(clientText.getString() + message + "\n");
+            messagesOnClient.push_back(message);
+            UpdateClientText();
         }
         else if (bytesReceived == 0) {
             printf("Disconnected from server.\n");
@@ -130,10 +190,10 @@ void ClientHandler(SOCKET clientSock) {
 
     // Send the entire chat history to the client
     std::string history = serverText.getString();
-    // Send the current chunk
     send(clientSock, history.c_str(), history.length(), 0);
 
-    serverText.setString("[" + name + "] connected.\n" + serverText.getString());
+    messagesOnServer.push_back("[" + name + "] connected.");
+    UpdateServerText();
 
     while (true) {
         char buffer[4096];
@@ -144,8 +204,10 @@ void ClientHandler(SOCKET clientSock) {
             break;
         }
 
+        //when the server receives a message it will send it back to all clients connected
         std::string message = "[" + GetNameBySocket(clientSock) + "]: " + std::string(buffer, bytesReceived);
-        serverText.setString(message + "\n" + serverText.getString());
+        messagesOnServer.push_back(message);
+        UpdateServerText();
 
         BroadcastMessage(message);
     }
