@@ -48,7 +48,7 @@ void RemoveClient(SOCKET clientSock) {
     for (size_t i = 0; i < clients.size(); ++i) {
         if (clients[i] == clientSock) {
             closesocket(clientSock);
-            std::cout << "" << GetNameBySocket(clientSock) << "] disconnected." << std::endl;
+            std::cout << "[" << GetNameBySocket(clientSock) << "] disconnected." << std::endl;
             clientNames.erase(clientNames.begin() + i);
             clients.erase(clients.begin() + i);
             break;
@@ -63,6 +63,13 @@ void BroadcastMessage(const std::string& message) {
 }
 
 void ClientHandler(SOCKET clientSock) {
+    // Get client's IP address
+    sockaddr_in clientAddr;
+    int addrSize = sizeof(clientAddr);
+    getpeername(clientSock, (sockaddr*)&clientAddr, &addrSize);
+    char clientIP[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &(clientAddr.sin_addr), clientIP, INET_ADDRSTRLEN);
+
     char clientName[256];
     int bytesReceived = recv(clientSock, clientName, sizeof(clientName) - 1, 0);
     if (bytesReceived <= 0) {
@@ -79,14 +86,14 @@ void ClientHandler(SOCKET clientSock) {
     send(clientSock, welcomeMessage.c_str(), welcomeMessage.length(), 0);
 
     // Send the entire chat message history to the client
-    for (std::string message : messages)
-    {
+    for (std::string message : messages) {
         send(clientSock, message.c_str(), message.length(), 0);
     }
 
-    std::cout << "[" << name << "] connected." << std::endl;
+    std::cout << "[" << name << "] connected from " << clientIP << std::endl;
 
     while (true) {
+        std::cout << "Waiting for a message..." << std::endl;
         char buffer[4096];
         ZeroMemory(buffer, sizeof(buffer));
         int bytesReceived = recv(clientSock, buffer, sizeof(buffer), 0);
@@ -124,7 +131,7 @@ void Server() {
         return;
     }
 
-    printf("Listening...\n");
+    std::cout << "Listening..." << std::endl;
     int status = listen(serverSock, 5);
     if (status == SOCKET_ERROR) {
         printf("Error in listen(). Error code: %d\n", WSAGetLastError());
@@ -133,7 +140,6 @@ void Server() {
         return;
     }
 
-    printf("Accepting...\n");
     sockaddr_in clientAddr;
     int addrlen = sizeof(clientAddr);
     while (true) {
@@ -158,8 +164,13 @@ int main() {
     }
 
     std::thread serverThread(Server);
-    serverThread.join();
 
+    std::string Name;
+    std::cout << "Enter Name: ";
+    std::getline(std::cin, Name);
+
+
+    serverThread.join();
     WSACleanup();
     return 0;
 }
