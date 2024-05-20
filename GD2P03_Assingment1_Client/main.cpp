@@ -82,6 +82,11 @@ void Client() {
         return;
     }
 
+    std::string connectionChoice;
+    std::cout << "Enther Server IP, or '1' to connect to 127.0.0.1: ";
+    std::getline(std::cin, connectionChoice);
+    deleteLines(1);
+    
     std::string Name;
     std::cout << "Enter Name: ";
     std::getline(std::cin, Name);
@@ -90,7 +95,17 @@ void Client() {
     sockaddr_in recvAddr;
     recvAddr.sin_family = AF_INET;
     recvAddr.sin_port = htons(15366); // Server port
-    InetPton(AF_INET, L"127.0.0.1", &recvAddr.sin_addr.S_un.S_addr);
+    std::wstring serverIP = L"127.0.0.1";
+    if (connectionChoice == "1")
+    {
+
+        InetPton(AF_INET, serverIP.c_str(), &recvAddr.sin_addr.S_un.S_addr);
+    }
+    else
+    {
+        serverIP = std::wstring(connectionChoice.begin(), connectionChoice.end());
+        InetPton(AF_INET, serverIP.c_str(), &recvAddr.sin_addr.S_un.S_addr);
+    }
 
     int status = connect(clientSock, (sockaddr*)&recvAddr, sizeof(recvAddr));
     if (status == SOCKET_ERROR) {
