@@ -1,36 +1,32 @@
 #include <iostream>
-#include <stdio.h>
 #include <string>
-#include <sstream>
 #include <vector>
 #include <thread>
-#include <algorithm>
-
+#include <unordered_map>
 #include <winsock2.h>
 #include <WS2tcpip.h>
-#include <unordered_map>
+#include <algorithm>
+
 #pragma comment(lib, "Ws2_32.lib")
 
 std::vector<SOCKET> clients;
 std::vector<std::string> clientNames;
-std::vector<std::string> messages; 
 std::unordered_map<SOCKET, std::string> clientLastMessage;
-bool running = true;
+bool running = true; 
+SOCKET serverSock;
 
 bool InitWSA() {
-    WORD wVersionRequested;
+    WORD wVersionRequested = MAKEWORD(2, 2); // Winsock version 2.2
     WSADATA wsaData;
-    wVersionRequested = MAKEWORD(2, 2); //winsock version 2.2
 
     int result = WSAStartup(wVersionRequested, &wsaData);
     if (result != 0) {
-        printf("WSAStartUp failed %d\n", result);
+        std::cerr << "WSAStartUp failed: " << result << std::endl;
         return false;
     }
 
-    //check version exists. ints we check against should match above
     if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
-        printf("Error: Version is not available\n");
+        std::cerr << "Error: Winsock version 2.2 not available" << std::endl;
         WSACleanup();
         return false;
     }
@@ -38,41 +34,27 @@ bool InitWSA() {
 }
 
 void BroadcastMessage(const std::string& message) {
-    for (size_t i = 0; i < clients.size(); ++i) {
-        send(clients[i], message.c_str(), message.length(), 0);
+    for (SOCKET client : clients) {
+        send(client, message.c_str(), message.length(), 0);
     }
-}
-
-void BroadcastMessageButOne(const std::string& message, SOCKET IgnoredClient) {
-    for (size_t i = 0; i < clients.size(); ++i) {
-        if (clients[i] == IgnoredClient) return;
-
-        send(clients[i], message.c_str(), message.length(), 0);
-    }
-}
-
-std::string GetNameBySocket(SOCKET clientSock) {
-    for (size_t i = 0; i < clients.size(); ++i) {
-        if (clients[i] == clientSock) {
-            return clientNames[i];
-        }
-    }
-    return "Unknown";
 }
 
 void RemoveClient(SOCKET clientSock) {
     for (size_t i = 0; i < clients.size(); ++i) {
         if (clients[i] == clientSock) {
             closesocket(clientSock);
-            std::cout << "[" << GetNameBySocket(clientSock) << "] disconnected." << std::endl;
+            std::cout << "[" << clientNames[i] << "] disconnected." << std::endl;
 
-            BroadcastMessage("[" + GetNameBySocket(clientSock) + "] disconnected."); 
-            clientNames.erase(clientNames.begin() + i);
+            BroadcastMessage("[" + clientNames[i] + "] disconnected.");
             clients.erase(clients.begin() + i);
+            clientNames.erase(clientNames.begin() + i);
 
-            if (clients.size() == 0)
+            if (clients.size() <= 0)
             {
-                ForceClose();
+                // Close the server
+                running = false;
+                closesocket(serverSock);
+                std::cout << "No clients left. Server is shutting down." << std::endl;
             }
             break;
         }
@@ -80,12 +62,12 @@ void RemoveClient(SOCKET clientSock) {
 }
 
 void ClientHandler(SOCKET clientSock) {
-    // Get client's IP address
+    // Get the client's IP address
     sockaddr_in clientAddr;
-    int addrSize = sizeof(clientAddr);
-    getpeername(clientSock, (sockaddr*)&clientAddr, &addrSize);
+    int addrLen = sizeof(clientAddr);
+    getpeername(clientSock, (sockaddr*)&clientAddr, &addrLen);
     char clientIP[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(clientAddr.sin_addr), clientIP, INET_ADDRSTRLEN);
+    inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, sizeof(clientIP));
 
     char clientName[256];
     int bytesReceived = recv(clientSock, clientName, sizeof(clientName) - 1, 0);
@@ -93,37 +75,29 @@ void ClientHandler(SOCKET clientSock) {
         closesocket(clientSock);
         return;
     }
-    clientName[bytesReceived] = '\0'; // Add null terminator to properly terminate the string
+    clientName[bytesReceived] = '\0';
     std::string name(clientName);
+
     clientNames.push_back(name);
     clients.push_back(clientSock);
 
-    // Send the welcome message to the client
     std::string welcomeMessage = "Welcome, " + name + "!\n";
     send(clientSock, welcomeMessage.c_str(), welcomeMessage.length(), 0);
 
-    // Send the entire chat message history to the client
-    for (std::string message : messages) {
-        send(clientSock, message.c_str(), message.length(), 0);
-    }
-
-    std::cout << "[" << name << "] connected from " << clientIP << std::endl;
-
-    //Send Connection notices to all clients but the one that has just join
-    BroadcastMessageButOne("[" + name + "] connected", clientSock);
+    // Add the IP address they connected from
+    std::cout << "[" << name << "] connected from IP: " << clientIP << std::endl;
+    BroadcastMessage("[" + name + "] connected.");
 
     while (running) {
         std::cout << "Waiting for a message..." << std::endl;
         char buffer[4096];
-        ZeroMemory(buffer, sizeof(buffer));
         int bytesReceived = recv(clientSock, buffer, sizeof(buffer), 0);
         if (bytesReceived <= 0) {
             RemoveClient(clientSock);
             break;
         }
 
-        std::string receivedMessage(buffer, bytesReceived);
-        std::string message;
+        std::string receivedMessage(buffer, bytesReceived); std::string message;
 
         if (receivedMessage.substr(0, 5) == "/PUT ") {
             // Store the message
@@ -131,7 +105,7 @@ void ClientHandler(SOCKET clientSock) {
             clientLastMessage[clientSock] = toStore;
             message = "[Server] message saved";
             send(clientSock, message.c_str(), message.size(), 0);
-            std::cout << "Message saved from client " << GetNameBySocket(clientSock) << std::endl;
+            std::cout << "Message saved from client " << name << std::endl;
         }
         else if (receivedMessage == "/GET") {
             // Retrieve the last stored message
@@ -141,7 +115,24 @@ void ClientHandler(SOCKET clientSock) {
             else {
                 message = "[Server] No message found";
             }
+            std::cout << "Saved Message sent to " << name << std::endl;
             send(clientSock, message.c_str(), message.size(), 0);
+        }
+        else if (receivedMessage.substr(0, 12) == "/CAPITALIZE ") {
+            // Capitalize the provided message
+            std::string toCapitalize = receivedMessage.substr(12); // Message after /CAPITALIZE
+            std::transform(toCapitalize.begin(), toCapitalize.end(), toCapitalize.begin(), ::toupper);
+            message = "[Server] " + toCapitalize;
+            send(clientSock, message.c_str(), message.size(), 0);
+            std::cout << "Message capitalized and sent to client " << name << std::endl;
+        }
+        else if (receivedMessage.substr(0, 9) == "/REVERSE ") {
+            // Reverse the provided message
+            std::string toReverse = receivedMessage.substr(9); // Message after /REVERSE
+            std::reverse(toReverse.begin(), toReverse.end());
+            message = "[Server] " + toReverse;
+            send(clientSock, message.c_str(), message.size(), 0);
+            std::cout << "Message reversed and sent to client " << name << std::endl;
         }
         else if (receivedMessage == "/QUIT") {
             // Handle client disconnection
@@ -151,10 +142,11 @@ void ClientHandler(SOCKET clientSock) {
         else if (receivedMessage[0] == '/') {
             // Handle invalid command
             message = "[Server] INVALID COMMAND";
+            std::cout << "Client sent invalid command: " << name << std::endl;
             send(clientSock, message.c_str(), message.size(), 0);
         }
         else {
-            message = "[" + GetNameBySocket(clientSock) + "] " + receivedMessage;
+            message = "[" + name + "] " + receivedMessage;
             std::cout << message << std::endl;
             BroadcastMessage(message);
         }
@@ -164,19 +156,19 @@ void ClientHandler(SOCKET clientSock) {
 void Server() {
     sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(15366); // Change to desired port
+    serverAddr.sin_port = htons(15366);
     serverAddr.sin_addr.s_addr = INADDR_ANY;
 
-    SOCKET serverSock = socket(AF_INET, SOCK_STREAM, 0);
+    serverSock = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSock == INVALID_SOCKET) {
-        printf("Error in socket(). Error code: %d\n", WSAGetLastError());
+        std::cerr << "Error in socket(). Error code: " << WSAGetLastError() << std::endl;
         WSACleanup();
         return;
     }
 
     int bound = bind(serverSock, (sockaddr*)&serverAddr, sizeof(serverAddr));
     if (bound == SOCKET_ERROR) {
-        printf("Error in bind(). Error code: %d\n", WSAGetLastError());
+        std::cerr << "Error in bind(). Error code: " << WSAGetLastError() << std::endl;
         closesocket(serverSock);
         WSACleanup();
         return;
@@ -185,7 +177,7 @@ void Server() {
     std::cout << "Listening..." << std::endl;
     int status = listen(serverSock, 5);
     if (status == SOCKET_ERROR) {
-        printf("Error in listen(). Error code: %d\n", WSAGetLastError());
+        std::cerr << "Error in listen(). Error code: " << WSAGetLastError() << std::endl;
         closesocket(serverSock);
         WSACleanup();
         return;
@@ -196,13 +188,21 @@ void Server() {
     while (running) {
         SOCKET clientSock = accept(serverSock, (sockaddr*)&clientAddr, &addrlen);
         if (clientSock == INVALID_SOCKET) {
-            printf("Error in accept(). Error code: %d\n", WSAGetLastError());
+            if (!running) {
+                break; // Server is shutting down
+            }
+            int error = WSAGetLastError();
+            if (error == WSAEINTR) {
+                std::cout << "Server shutdown initiated. Accept call interrupted." << std::endl;
+                break;
+            }
+            std::cerr << "Error in accept(). Error code: " << error << std::endl;
             closesocket(serverSock);
             WSACleanup();
             return;
         }
         std::thread clientThread(ClientHandler, clientSock);
-        clientThread.detach(); // Detach the thread to run independently
+        clientThread.detach();
     }
 
     closesocket(serverSock);
