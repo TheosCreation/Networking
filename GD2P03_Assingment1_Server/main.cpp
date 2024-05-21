@@ -70,7 +70,7 @@ void ClientHandler(SOCKET clientSock) {
     inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, sizeof(clientIP));
 
     char clientName[256];
-    int bytesReceived = recv(clientSock, clientName, sizeof(clientName) - 1, 0);
+    auto bytesReceived = recv(clientSock, clientName, sizeof(clientName) - 1, 0);
     if (bytesReceived <= 0) {
         closesocket(clientSock);
         return;
@@ -91,7 +91,7 @@ void ClientHandler(SOCKET clientSock) {
     while (running) {
         std::cout << "Waiting for a message..." << std::endl;
         char buffer[4096];
-        int bytesReceived = recv(clientSock, buffer, sizeof(buffer), 0);
+        auto bytesReceived = recv(clientSock, buffer, sizeof(buffer), 0);
         if (bytesReceived <= 0) {
             RemoveClient(clientSock);
             break;
