@@ -67,7 +67,7 @@ void ProcessInput(SOCKET clientSock) {
         //delete the current line and the input buffer and message the user inputted
         deleteLines(linesToDelete);
 
-        size_t bytesSent = send(clientSock, inputBuffer.c_str(), inputBuffer.length(), 0);
+        auto bytesSent = send(clientSock, inputBuffer.c_str(), inputBuffer.length(), 0);
         if (bytesSent == -1) {
             running = false;
             std::cerr << "Failed to send message to the server." << std::endl;
@@ -79,7 +79,7 @@ void ProcessInput(SOCKET clientSock) {
 void ReceiveMessages(SOCKET clientSock) {
     char buffer[4096];
     while (true) {
-        int bytesReceived = recv(clientSock, buffer, sizeof(buffer) - 1, 0);
+        auto bytesReceived = recv(clientSock, buffer, sizeof(buffer) - 1, 0);
         if (bytesReceived > 0) {
             buffer[bytesReceived] = '\0';
             //clear current line
@@ -130,7 +130,7 @@ void Client() {
         return;
     }
 
-    size_t bytesSent = send(clientSock, Name.c_str(), Name.length(), 0);
+    auto bytesSent = send(clientSock, Name.c_str(), Name.length(), 0);
     if (bytesSent == -1) {
         std::cerr << "Failed to send message to the server." << std::endl;
         closesocket(clientSock);
