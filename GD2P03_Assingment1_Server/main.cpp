@@ -1,3 +1,15 @@
+/***
+Bachelor of Software Engineering
+Media Design School
+Auckland
+New Zealand
+(c) 2024 Media Design School
+File Name : main.cpp
+Description : The entry point of the application
+Author : Theo Morris
+Mail : theo.morris@mds.ac.nz
+**/
+
 #include <iostream>
 #include <string>
 #include <vector>
@@ -9,12 +21,22 @@
 
 #pragma comment(lib, "Ws2_32.lib")
 
+// Bool to check if the application is running
+bool running = true;
+
+// A vector of all the current clients connected
 std::vector<SOCKET> clients;
+
+// A vector of all the clients connected names
 std::vector<std::string> clientNames;
+
+// A unordered map of messages from clients searchable with a socket
 std::unordered_map<SOCKET, std::string> clientLastMessage;
-bool running = true; 
+
+// Socket the server runs on
 SOCKET serverSock;
 
+// Initilizes Winsock 2.2
 bool InitWSA() {
     WORD wVersionRequested = MAKEWORD(2, 2); // Winsock version 2.2
     WSADATA wsaData;
@@ -33,12 +55,14 @@ bool InitWSA() {
     return true;
 }
 
+// Broadcasts a message to all the clients connected
 void BroadcastMessage(const std::string& message) {
     for (SOCKET client : clients) {
         send(client, message.c_str(), message.length(), 0);
     }
 }
 
+// Removes a specific Client
 void RemoveClient(SOCKET clientSock) {
     for (size_t i = 0; i < clients.size(); ++i) {
         if (clients[i] == clientSock) {
@@ -61,14 +85,16 @@ void RemoveClient(SOCKET clientSock) {
     }
 }
 
+// handles each client connected to the server
 void ClientHandler(SOCKET clientSock) {
-    // Get the client's IP address
+    // Gets the client's IP address
     sockaddr_in clientAddr;
     int addrLen = sizeof(clientAddr);
     getpeername(clientSock, (sockaddr*)&clientAddr, &addrLen);
     char clientIP[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, sizeof(clientIP));
 
+    // Gets the client's Name
     char clientName[256];
     auto bytesReceived = recv(clientSock, clientName, sizeof(clientName) - 1, 0);
     if (bytesReceived <= 0) {
@@ -81,15 +107,18 @@ void ClientHandler(SOCKET clientSock) {
     clientNames.push_back(name);
     clients.push_back(clientSock);
 
+    // Sends a welcome message to the client that join
     std::string welcomeMessage = "Welcome, " + name + "!\n";
     send(clientSock, welcomeMessage.c_str(), welcomeMessage.length(), 0);
 
-    // Add the IP address they connected from
+    // Outputs to the server and every client that a user has connected
     std::cout << "[" << name << "] connected from IP: " << clientIP << std::endl;
     BroadcastMessage("[" + name + "] connected.");
 
     while (running) {
+        // While the app is running waits for a message 
         std::cout << "Waiting for a message..." << std::endl;
+
         char buffer[4096];
         auto bytesReceived = recv(clientSock, buffer, sizeof(buffer), 0);
         if (bytesReceived <= 0) {
@@ -97,7 +126,9 @@ void ClientHandler(SOCKET clientSock) {
             break;
         }
 
-        std::string receivedMessage(buffer, bytesReceived); std::string message;
+        // Once a message has been received it will be read to see if its a command
+        std::string receivedMessage(buffer, bytesReceived); 
+        std::string message;
 
         if (receivedMessage.substr(0, 5) == "/PUT ") {
             // Store the message
@@ -146,6 +177,7 @@ void ClientHandler(SOCKET clientSock) {
             send(clientSock, message.c_str(), message.size(), 0);
         }
         else {
+            // If the message is not a command send the message with the name along side it to all clients
             message = "[" + name + "] " + receivedMessage;
             std::cout << message << std::endl;
             BroadcastMessage(message);
@@ -153,6 +185,7 @@ void ClientHandler(SOCKET clientSock) {
     }
 }
 
+// Handle all the server functionality
 void Server() {
     sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;

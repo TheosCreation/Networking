@@ -1,3 +1,15 @@
+/***
+Bachelor of Software Engineering
+Media Design School
+Auckland
+New Zealand
+(c) 2024 Media Design School
+File Name : main.cpp
+Description : The entry point of the application
+Author : Theo Morris
+Mail : theo.morris@mds.ac.nz
+**/
+
 #include <iostream>
 #include <string>
 #include <vector>
@@ -5,14 +17,17 @@
 #include <algorithm>
 #include <winsock2.h>
 #include <WS2tcpip.h>
-#include <condition_variable>
 #include <windows.h>
 
 #pragma comment(lib, "Ws2_32.lib")
 
+// Bool to check if the application is running
 bool running = true;
+
+// Message that will prompt user for input
 std::string loopMessage = "Enter Message: ";
 
+// Initilizes Winsock 2.2
 bool InitWSA() {
     WORD wVersionRequested = MAKEWORD(2, 2); // Winsock version 2.2
     WSADATA wsaData;
