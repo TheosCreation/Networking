@@ -79,6 +79,7 @@ void ProcessInput(SOCKET clientSock) {
 
         //calculated how many lines the user inputted
         int linesToDelete = calculateLines(inputBuffer + loopMessage);
+
         //delete the current line and the input buffer and message the user inputted
         deleteLines(linesToDelete);
 
@@ -115,16 +116,19 @@ void ReceiveMessages(SOCKET clientSock) {
 }
 
 void Client() {
+    // Creates a socket
     SOCKET clientSock = socket(AF_INET, SOCK_STREAM, 0);
     if (clientSock == INVALID_SOCKET) {
         std::cerr << "Error in socket(), Error code " << WSAGetLastError() << std::endl;
         return;
     }
 
+    // Gets the connection ip from the user
     std::string connectionChoice;
     std::cout << "Enter Server IP, or '1' to connect to 127.0.0.1: ";
     std::getline(std::cin, connectionChoice);
 
+    // Gets the name of the user
     std::string Name;
     std::cout << "Enter Name: ";
     std::getline(std::cin, Name);
