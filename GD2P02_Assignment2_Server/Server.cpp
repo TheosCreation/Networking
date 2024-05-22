@@ -12,6 +12,7 @@ Mail : theo.morris@mds.ac.nz
 
 #include "Server.h"
 #include "ClientHandler.h"
+#include <thread>
 
 Server::Server(int port) : port(port), running(false), serverSock(INVALID_SOCKET) {}
 
